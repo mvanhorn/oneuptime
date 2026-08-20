@@ -34,6 +34,7 @@ import ProjectBalanceType from "../../Types/Billing/ProjectBalanceType";
 import BalanceAdjustmentType from "../../Types/Billing/BalanceAdjustmentType";
 import ObjectID from "../../Types/ObjectID";
 import { JSONObject, JSONValue } from "../../Types/JSON";
+import DatabaseCommonInteractionProps from "../../Types/BaseDatabase/DatabaseCommonInteractionProps";
 
 /*
  * The reason is free text a customer types into the delete confirmation. The
@@ -180,6 +181,16 @@ export default class ProjectAPI extends BaseAPI<Project, ProjectServiceType> {
             );
           }
 
+          const props: DatabaseCommonInteractionProps =
+            await CommonAPI.getDatabaseCommonInteractionProps(req);
+
+          CommonAPI.assertPermittedInProject({
+            databaseProps: props,
+            allowedPermissions: new Project().getDeletePermissions(),
+            errorMessage:
+              "You do not have permission to delete this project.",
+          });
+
           const body: JSONObject = (req.body as JSONObject) || {};
           const data: JSONObject = (body["data"] as JSONObject) || {};
           const deletionReasonValue: JSONValue = data["deletionReason"];
@@ -207,7 +218,7 @@ export default class ProjectAPI extends BaseAPI<Project, ProjectServiceType> {
           await ProjectService.deleteOneById({
             id: projectId,
             deletionReason: deletionReason,
-            props: await CommonAPI.getDatabaseCommonInteractionProps(req),
+            props: props,
           });
 
           return Response.sendEmptySuccessResponse(req, res);

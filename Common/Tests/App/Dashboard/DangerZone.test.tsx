@@ -11,12 +11,14 @@ import { beforeEach, describe, expect, it } from "@jest/globals";
 import API from "../../../UI/Utils/API/API";
 import ProjectUtil from "../../../UI/Utils/Project";
 import PermissionUtil from "../../../UI/Utils/Permission";
+import User from "../../../UI/Utils/User";
 import HTTPErrorResponse from "../../../Types/API/HTTPErrorResponse";
 import HTTPResponse from "../../../Types/API/HTTPResponse";
 import Route from "../../../Types/API/Route";
 import Dictionary from "../../../Types/Dictionary";
 import ObjectID from "../../../Types/ObjectID";
 import { JSONObject } from "../../../Types/JSON";
+import Permission from "../../../Types/Permission";
 import { getJestSpyOn } from "../../Spy";
 
 /*
@@ -171,6 +173,10 @@ describe("Settings > Danger Zone", () => {
     getJestSpyOn(PermissionUtil, "clearProjectPermissions").mockImplementation(
       () => {},
     );
+    getJestSpyOn(PermissionUtil, "getAllPermissions").mockReturnValue([
+      Permission.ProjectOwner,
+    ]);
+    getJestSpyOn(User, "isMasterAdmin").mockReturnValue(false);
 
     getJestSpyOn(API, "post").mockImplementation((data: any) => {
       postCalls.push({
@@ -205,6 +211,42 @@ describe("Settings > Danger Zone", () => {
     renderPage();
 
     expect(screen.getByText(/no way to recover/i)).toBeInTheDocument();
+  });
+
+  it("hides the delete control from a project member", () => {
+    getJestSpyOn(PermissionUtil, "getAllPermissions").mockReturnValue([
+      Permission.ProjectMember,
+    ]);
+
+    renderPage();
+
+    expect(screen.queryByText(/no way to recover/i)).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Delete Project" }),
+    ).toBeNull();
+  });
+
+  it("shows the delete control to a user granted DeleteProject", () => {
+    getJestSpyOn(PermissionUtil, "getAllPermissions").mockReturnValue([
+      Permission.DeleteProject,
+    ]);
+
+    renderPage();
+
+    expect(
+      screen.getByRole("button", { name: "Delete Project" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the delete control to a master admin", () => {
+    getJestSpyOn(PermissionUtil, "getAllPermissions").mockReturnValue([]);
+    getJestSpyOn(User, "isMasterAdmin").mockReturnValue(true);
+
+    renderPage();
+
+    expect(
+      screen.getByRole("button", { name: "Delete Project" }),
+    ).toBeInTheDocument();
   });
 
   it("does not ask anything until the customer confirms they want to delete", () => {

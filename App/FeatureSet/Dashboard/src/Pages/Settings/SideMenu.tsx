@@ -2,13 +2,20 @@ import PageMap from "../../Utils/PageMap";
 import RouteMap, { RouteUtil } from "../../Utils/RouteMap";
 import Route from "Common/Types/API/Route";
 import IconProp from "Common/Types/Icon/IconProp";
+import Project from "Common/Models/DatabaseModels/Project";
 import SideMenu, {
   SideMenuSectionProps,
 } from "Common/UI/Components/SideMenu/SideMenu";
 import { BILLING_ENABLED } from "Common/UI/Config";
+import PermissionUtil from "Common/UI/Utils/Permission";
+import User from "Common/UI/Utils/User";
 import React, { ReactElement } from "react";
 
 const DashboardSideMenu: () => JSX.Element = (): ReactElement => {
+  const canDeleteProject: boolean =
+    User.isMasterAdmin() ||
+    new Project().hasDeletePermissions(PermissionUtil.getAllPermissions());
+
   const sections: SideMenuSectionProps[] = [
     {
       title: "Basic",
@@ -281,21 +288,25 @@ const DashboardSideMenu: () => JSX.Element = (): ReactElement => {
         },
       ],
     },
-    {
-      title: "Danger Zone",
-      items: [
-        {
-          link: {
+    ...(canDeleteProject
+      ? [
+          {
             title: "Danger Zone",
-            to: RouteUtil.populateRouteParams(
-              RouteMap[PageMap.SETTINGS_DANGERZONE] as Route,
-            ),
+            items: [
+              {
+                link: {
+                  title: "Danger Zone",
+                  to: RouteUtil.populateRouteParams(
+                    RouteMap[PageMap.SETTINGS_DANGERZONE] as Route,
+                  ),
+                },
+                icon: IconProp.Error,
+                className: "danger-on-hover",
+              },
+            ],
           },
-          icon: IconProp.Error,
-          className: "danger-on-hover",
-        },
-      ],
-    },
+        ]
+      : []),
   ];
 
   // Conditionally add Billing section

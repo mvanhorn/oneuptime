@@ -23,7 +23,12 @@ import PositiveNumber from "../../../Types/PositiveNumber";
 import Project from "../../../Models/DatabaseModels/Project";
 import TeamMember from "../../../Models/DatabaseModels/TeamMember";
 import BadDataException from "../../../Types/Exception/BadDataException";
-import Permission, { UserPermission } from "../../../Types/Permission";
+import NotAuthorizedException from "../../../Types/Exception/NotAuthorizedException";
+import Permission, {
+  UserPermission,
+  UserTenantAccessPermission,
+} from "../../../Types/Permission";
+import UserType from "../../../Types/UserType";
 
 jest.mock("../../../Server/EnvironmentConfig", () => {
   return {
@@ -502,6 +507,47 @@ describe("ProjectAPI", () => {
       "Project ID in the URL does not match the project the request is authenticated for",
     );
 
+    const setProjectPermissions: (
+      projectId: ObjectID,
+      permissions: Array<UserPermission>,
+    ) => void = (
+      projectId: ObjectID,
+      permissions: Array<UserPermission>,
+    ): void => {
+      mockRequest.userTenantAccessPermission = {
+        [projectId.toString()]: {
+          _type: "UserTenantAccessPermission",
+          projectId: projectId,
+          permissions: permissions,
+        } as UserTenantAccessPermission,
+      };
+    };
+
+    const permissionRow: (
+      permission: Permission,
+      isBlockPermission?: boolean,
+    ) => UserPermission = (
+      permission: Permission,
+      isBlockPermission: boolean = false,
+    ): UserPermission => {
+      return {
+        _type: "UserPermission",
+        permission: permission,
+        labelIds: [],
+        isBlockPermission: isBlockPermission,
+      };
+    };
+
+    const grantDeletePermission: (
+      projectId: ObjectID,
+      permission?: Permission,
+    ) => void = (
+      projectId: ObjectID,
+      permission: Permission = Permission.ProjectOwner,
+    ): void => {
+      setProjectPermissions(projectId, [permissionRow(permission)]);
+    };
+
     beforeEach(() => {
       ProjectService.deleteOneById = jest.fn().mockResolvedValue(1);
       /*
@@ -521,12 +567,91 @@ describe("ProjectAPI", () => {
       (Response.sendEmptySuccessResponse as jest.Mock).mockClear();
     });
 
-    it("deletes the authenticated tenant's own project", async () => {
+    it.each([Permission.ProjectOwner, Permission.DeleteProject])(
+      "deletes the authenticated tenant's own project with %s permission",
+      async (permission: Permission) => {
+        const projectId: ObjectID = ObjectID.generate();
+        const userId: ObjectID = ObjectID.generate();
+
+        mockRequest.params = { id: projectId.toString() };
+        mockRequest.tenantId = projectId;
+        mockRequest.userAuthorization = { userId: userId } as JSONWebTokenData;
+        mockRequest.body = { data: { deletionReason: "We built our own" } };
+        grantDeletePermission(projectId, permission);
+
+        await mockRouter
+          .match("post", "/project/:id/delete-project")
+          .handlerFunction(mockRequest, mockResponse, nextFunction);
+
+        expect(nextFunction).not.toHaveBeenCalled();
+        expect(ProjectService.deleteOneById).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: projectId,
+            deletionReason: "We built our own",
+            props: expect.objectContaining({
+              tenantId: projectId,
+              userId: userId,
+            }),
+          }),
+        );
+        expect(Response.sendEmptySuccessResponse).toHaveBeenCalledWith(
+          mockRequest,
+          mockResponse,
+        );
+      },
+    );
+
+    it.each([Permission.ProjectMember, Permission.ProjectAdmin])(
+      "refuses to delete with only %s permission",
+      async (permission: Permission) => {
+        const projectId: ObjectID = ObjectID.generate();
+
+        mockRequest.params = { id: projectId.toString() };
+        mockRequest.tenantId = projectId;
+        mockRequest.body = { data: { deletionReason: "not allowed" } };
+        setProjectPermissions(projectId, [permissionRow(permission)]);
+
+        await mockRouter
+          .match("post", "/project/:id/delete-project")
+          .handlerFunction(mockRequest, mockResponse, nextFunction);
+
+        expect(nextFunction).toHaveBeenCalledWith(
+          expect.any(NotAuthorizedException),
+        );
+        expect(ProjectService.deleteOneById).not.toHaveBeenCalled();
+        expect(Response.sendEmptySuccessResponse).not.toHaveBeenCalled();
+      },
+    );
+
+    it("refuses block-only delete permission rows", async () => {
       const projectId: ObjectID = ObjectID.generate();
 
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
-      mockRequest.body = { data: { deletionReason: "We built our own" } };
+      mockRequest.body = { data: { deletionReason: "not allowed" } };
+      setProjectPermissions(projectId, [
+        permissionRow(Permission.ProjectOwner, true),
+        permissionRow(Permission.DeleteProject, true),
+      ]);
+
+      await mockRouter
+        .match("post", "/project/:id/delete-project")
+        .handlerFunction(mockRequest, mockResponse, nextFunction);
+
+      expect(nextFunction).toHaveBeenCalledWith(
+        expect.any(NotAuthorizedException),
+      );
+      expect(ProjectService.deleteOneById).not.toHaveBeenCalled();
+      expect(Response.sendEmptySuccessResponse).not.toHaveBeenCalled();
+    });
+
+    it("allows a master admin without project delete grants", async () => {
+      const projectId: ObjectID = ObjectID.generate();
+
+      mockRequest.params = { id: projectId.toString() };
+      mockRequest.tenantId = projectId;
+      mockRequest.userType = UserType.MasterAdmin;
+      mockRequest.body = { data: { deletionReason: "admin cleanup" } };
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -536,12 +661,9 @@ describe("ProjectAPI", () => {
       expect(ProjectService.deleteOneById).toHaveBeenCalledWith(
         expect.objectContaining({
           id: projectId,
-          deletionReason: "We built our own",
+          deletionReason: "admin cleanup",
+          props: expect.objectContaining({ isMasterAdmin: true }),
         }),
-      );
-      expect(Response.sendEmptySuccessResponse).toHaveBeenCalledWith(
-        mockRequest,
-        mockResponse,
       );
     });
 
@@ -603,6 +725,7 @@ describe("ProjectAPI", () => {
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
       mockRequest.body = {};
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -623,6 +746,7 @@ describe("ProjectAPI", () => {
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
       mockRequest.body = { data: { deletionReason: "   " } };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -639,6 +763,7 @@ describe("ProjectAPI", () => {
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
       mockRequest.body = { data: { deletionReason: { $ne: null } } };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -663,6 +788,7 @@ describe("ProjectAPI", () => {
       mockRequest.body = {
         data: { deletionReason: "too\u0000 expensive\u0000" },
       };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -679,6 +805,7 @@ describe("ProjectAPI", () => {
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
       mockRequest.body = { data: { deletionReason: "\u0000\u0000" } };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -696,6 +823,7 @@ describe("ProjectAPI", () => {
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
       mockRequest.body = { data: { deletionReason: "  too expensive  " } };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -719,6 +847,7 @@ describe("ProjectAPI", () => {
       mockRequest.body = {
         data: { deletionReason: "a".repeat(MAX_DELETION_REASON_LENGTH + 500) },
       };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -746,6 +875,7 @@ describe("ProjectAPI", () => {
       mockRequest.tenantId = projectId;
       mockRequest.userAuthorization = { userId: userId } as JSONWebTokenData;
       mockRequest.body = { data: { deletionReason: "done with it" } };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")
@@ -776,6 +906,7 @@ describe("ProjectAPI", () => {
       mockRequest.params = { id: projectId.toString() };
       mockRequest.tenantId = projectId;
       mockRequest.body = { data: { deletionReason: "nope" } };
+      grantDeletePermission(projectId);
 
       await mockRouter
         .match("post", "/project/:id/delete-project")

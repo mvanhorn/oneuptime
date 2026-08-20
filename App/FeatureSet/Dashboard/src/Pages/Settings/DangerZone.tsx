@@ -16,6 +16,7 @@ import { APP_API_URL, BILLING_ENABLED } from "Common/UI/Config";
 import API from "Common/UI/Utils/API/API";
 import ModelAPI from "Common/UI/Utils/ModelAPI/ModelAPI";
 import PermissionUtil from "Common/UI/Utils/Permission";
+import User from "Common/UI/Utils/User";
 import Project from "Common/Models/DatabaseModels/Project";
 import HTTPErrorResponse from "Common/Types/API/HTTPErrorResponse";
 import HTTPResponse from "Common/Types/API/HTTPResponse";
@@ -37,6 +38,10 @@ const Settings: FunctionComponent<ComponentProps> = (
    * follow up with on a self-hosted install, and nowhere it would be recorded.
    */
   const [deletionReason, setDeletionReason] = useState<string>("");
+
+  const canDeleteProject: boolean =
+    User.isMasterAdmin() ||
+    new Project().hasDeletePermissions(PermissionUtil.getAllPermissions());
 
   type DeleteProjectFunction = () => Promise<void>;
 
@@ -92,44 +97,50 @@ const Settings: FunctionComponent<ComponentProps> = (
       ]}
       sideMenu={<DashboardSideMenu />}
     >
-      <Alert
-        type={AlertType.DANGER}
-        strongTitle="DANGER ZONE"
-        title="Deleting your project will delete it permanently and there is no way to recover. "
-      />
+      {canDeleteProject ? (
+        <>
+          <Alert
+            type={AlertType.DANGER}
+            strongTitle="DANGER ZONE"
+            title="Deleting your project will delete it permanently and there is no way to recover. "
+          />
 
-      <ModelDelete
-        modelType={Project}
-        modelId={projectId}
-        onDelete={deleteProject}
-        confirmationContent={
-          BILLING_ENABLED ? (
-            <div>
-              <FieldLabelElement
-                title="Why are you deleting this project?"
-                htmlFor="project-deletion-reason"
-                description="Optional. Telling us what went wrong helps us make OneUptime better."
-              />
-              <div className="mt-2">
-                <TextArea
-                  id="project-deletion-reason"
-                  dataTestId="project-deletion-reason"
-                  value={deletionReason}
-                  placeholder="It would be great to know why you're leaving..."
-                  onChange={(value: string) => {
-                    setDeletionReason(value);
-                  }}
-                />
-              </div>
-            </div>
-          ) : undefined
-        }
-        onDeleteSuccess={() => {
-          ProjectUtil.clearCurrentProject();
-          PermissionUtil.clearProjectPermissions();
-          props.onProjectDeleted();
-        }}
-      />
+          <ModelDelete
+            modelType={Project}
+            modelId={projectId}
+            onDelete={deleteProject}
+            confirmationContent={
+              BILLING_ENABLED ? (
+                <div>
+                  <FieldLabelElement
+                    title="Why are you deleting this project?"
+                    htmlFor="project-deletion-reason"
+                    description="Optional. Telling us what went wrong helps us make OneUptime better."
+                  />
+                  <div className="mt-2">
+                    <TextArea
+                      id="project-deletion-reason"
+                      dataTestId="project-deletion-reason"
+                      value={deletionReason}
+                      placeholder="It would be great to know why you're leaving..."
+                      onChange={(value: string) => {
+                        setDeletionReason(value);
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : undefined
+            }
+            onDeleteSuccess={() => {
+              ProjectUtil.clearCurrentProject();
+              PermissionUtil.clearProjectPermissions();
+              props.onProjectDeleted();
+            }}
+          />
+        </>
+      ) : (
+        <></>
+      )}
     </Page>
   );
 };
